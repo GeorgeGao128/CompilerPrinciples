@@ -97,38 +97,18 @@ int main(){
             continue;
         }
 
-        if((c=='-' && isdigit(peek(1))) || isdigit(c)){
-            if(c=='-'){
-                const Token* prev = tokens.empty() ? nullptr : &tokens.back();
-                if(prev_is_value(prev)){
-                } else {
-                    size_t st = pos;
-                    pos++; 
-                    if(peek()=='0'){
-                        pos++;
-                    } else {
-                        while(isdigit(peek())) pos++;
-                    }
-                    string s = input.substr(st, pos-st);
-                    tk.type = "IntConst";
-                    tk.text = s;
-                    tokens.push_back(tk);
-                    continue;
-                }
+        if(isdigit(c)){
+            size_t st = pos;
+            if(peek()=='0'){
+                pos++;
+            } else {
+                while(pos < input.size() && isdigit(peek())) pos++;
             }
-            if(isdigit(c)){
-                size_t st = pos;
-                if(peek()=='0'){
-                    pos++;
-                } else {
-                    while(pos < input.size() && isdigit(peek())) pos++;
-                }
-                string s = input.substr(st, pos-st);
-                tk.type = "IntConst";
-                tk.text = s;
-                tokens.push_back(tk);
-                continue;
-            }
+            string s = input.substr(st, pos-st);
+            tk.type = "IntConst";
+            tk.text = s;
+            tokens.push_back(tk);
+            continue;
         }
 
         if(c=='|' && peek(1)=='|'){
