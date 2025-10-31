@@ -1,2 +1,2 @@
 test:
-	clang++ -std=c++17 WordAnalyzer.c++ -o WordAnalyzer
+	clang++ -std=c++17 WordAnalyzer.cpp -o WordAnalyzer
