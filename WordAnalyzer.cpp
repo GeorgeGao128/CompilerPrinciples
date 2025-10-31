@@ -97,19 +97,16 @@ int main(){
             continue;
         }
 
-        if(isdigit(c)){
+        if (isdigit(c)) {
             size_t st = pos;
-            if(peek()=='0'){
-                pos++;
-            } else {
-                while(pos < input.size() && isdigit(peek())) pos++;
-            }
-            string s = input.substr(st, pos-st);
+            while (isdigit(peek())) pos++;
+            string s = input.substr(st, pos - st);
             tk.type = "IntConst";
             tk.text = s;
             tokens.push_back(tk);
             continue;
         }
+
 
         if(c=='|' && peek(1)=='|'){
             tk.type = "'||'"; tk.text = "||"; pos+=2; tokens.push_back(tk); continue;
