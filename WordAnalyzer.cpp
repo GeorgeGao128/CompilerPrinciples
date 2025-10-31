@@ -128,7 +128,7 @@ int main(){
         }
 
         string one(1,c);
-        vector<char> single_ops = {'+', '-', '*', '/', '%', '<', '>', '=', ';', ',', '(', ')', '{', '}'};
+        vector<char> single_ops = {'+', '-', '*', '/', '%', '<', '>', '=', ';', ',', '(', ')', '{', '}', '!'};
         if(find(single_ops.begin(), single_ops.end(), c) != single_ops.end()){
             tk.type = string("'")+one+string("'");
             tk.text = one;
