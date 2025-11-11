@@ -1,371 +1,409 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include <map>
-#include <set>
-#include <sstream>
 #include <cctype>
+#include <map>
+#include <unordered_map>
+#include <set>
+#include <algorithm>
 
-enum class TokenType {
-    INT, VOID, IF, ELSE, WHILE, BREAK, CONTINUE, RETURN,
-    ID, NUMBER,
-    PLUS, MINUS, STAR, SLASH, PERCENT,
-    ASSIGN, EQ, NE, LT, LE, GT, GE,
-    AND, OR, NOT,
-    LPAREN, RPAREN, LBRACE, RBRACE,
-    COMMA, SEMICOLON,
-    END_OF_FILE, UNKNOWN
+using namespace std;
+
+class ErrorReporter {
+private:
+    map<int, string> lineToMessage;
+public:
+    void report(int line, const string& message) {
+        if (lineToMessage.find(line) == lineToMessage.end()) {
+            lineToMessage[line] = message;
+        }
+    }
+    bool hasError() const {
+        return !lineToMessage.empty();
+    }
+    const map<int, string>& errors() const {
+        return lineToMessage;
+    }
+};
+
+enum class TokenKind {
+    Eof,
+    Int, Void, If, Else, While,
+    Break, Continue, Return,
+    Id, Number,
+    Plus, Minus, Star, Div, Mod,
+    Lt, Le, Gt, Ge, Eq, Ne,
+    And, Or, Not,
+    Assign,
+    LParen, RParen, LBrace, RBrace,
+    Semicolon, Comma
 };
 
 struct Token {
-    TokenType type;
-    std::string lexeme;
+    TokenKind type;
+    string value;
     int line;
 };
 
 class Lexer {
-public:
-    Lexer(const std::string& input, std::set<std::string>& errors, bool& hasError)
-        : input_(input), pos_(0), line_(1), errors_(errors), hasError_(hasError) {
-        keywords_ = {
-            {"int", TokenType::INT},       {"void", TokenType::VOID},
-            {"if", TokenType::IF},         {"else", TokenType::ELSE},
-            {"while", TokenType::WHILE},   {"break", TokenType::BREAK},
-            {"continue", TokenType::CONTINUE}, {"return", TokenType::RETURN}
-        };
-    }
-
-    Token getNextToken() {
-        skipWhitespaceAndComments();
-
-        if (pos_ >= input_.length()) {
-            return {TokenType::END_OF_FILE, "", line_};
-        }
-
-        char current = input_[pos_];
-
-        if (std::isalpha(current) || current == '_') {
-            return identifier();
-        }
-
-        if (std::isdigit(current)) {
-            return number();
-        }
-
-        switch (current) {
-            case '+': return makeToken(TokenType::PLUS, "+");
-            case '-': return makeToken(TokenType::MINUS, "-");
-            case '*': return makeToken(TokenType::STAR, "*");
-            case '/': return makeToken(TokenType::SLASH, "/");
-            case '%': return makeToken(TokenType::PERCENT, "%");
-            case '(': return makeToken(TokenType::LPAREN, "(");
-            case ')': return makeToken(TokenType::RPAREN, ")");
-            case '{': return makeToken(TokenType::LBRACE, "{");
-            case '}': return makeToken(TokenType::RBRACE, "}");
-            case ',': return makeToken(TokenType::COMMA, ",");
-            case ';': return makeToken(TokenType::SEMICOLON, ";");
-
-            case '=':
-                return (peek() == '=') ? (advance(), makeToken(TokenType::EQ, "==")) : makeToken(TokenType::ASSIGN, "=");
-            case '!':
-                return (peek() == '=') ? (advance(), makeToken(TokenType::NE, "!=")) : makeToken(TokenType::NOT, "!");
-            case '<':
-                return (peek() == '=') ? (advance(), makeToken(TokenType::LE, "<=")) : makeToken(TokenType::LT, "<");
-            case '>':
-                return (peek() == '=') ? (advance(), makeToken(TokenType::GE, ">=")) : makeToken(TokenType::GT, ">");
-            case '&':
-                return (peek() == '&') ? (advance(), makeToken(TokenType::AND, "&&")) : makeToken(TokenType::UNKNOWN, "&");
-            case '|':
-                return (peek() == '|') ? (advance(), makeToken(TokenType::OR, "||")) : makeToken(TokenType::UNKNOWN, "|");
-        
-            default:
-                lexerError("未知字符");
-                advance();
-                return makeToken(TokenType::UNKNOWN, std::string(1, current));
-        }
-    }
-
 private:
-    std::string input_;
-    size_t pos_;
-    int line_;
-    std::map<std::string, TokenType> keywords_;
-    std::set<std::string>& errors_;
-    bool& hasError_;
+    string input;
+    size_t pos;
+    int line;
+    ErrorReporter& reporter;
 
-    void advance() {
-        if (pos_ < input_.length()) {
-            pos_++;
+    char peek(int offset = 0) {
+        if (pos + offset >= input.length()) return '\0';
+        return input[pos + offset];
+    }
+
+    char advance() {
+        if (pos >= input.length()) return '\0';
+        char ch = input[pos++];
+        if (ch == '\n') line++;
+        return ch;
+    }
+
+    void skipWhitespace() {
+        while (isspace(peek())) {
+            advance();
         }
     }
 
-    char peek() {
-        if (pos_ + 1 >= input_.length()) return '\0';
-        return input_[pos_ + 1];
-    }
-
-    char peekNext() {
-        if (pos_ + 2 >= input_.length()) return '\0';
-        return input_[pos_ + 2];
-    }
-
-    Token makeToken(TokenType type, const std::string& lexeme) {
-        advance();
-        return {type, lexeme, line_};
-    }
-
-    void skipWhitespaceAndComments() {
-        while (pos_ < input_.length()) {
-            char current = input_[pos_];
-            if (std::isspace(current)) {
-                if (current == '\n') {
-                    line_++;
+    bool skipComment() {
+        if (peek() == '/' && peek(1) == '/') {
+            while (peek() != '\n' && peek() != '\0') advance();
+            return true;
+        }
+        if (peek() == '/' && peek(1) == '*') {
+            int startLine = line;
+            advance(); advance();
+            while (true) {
+                if (peek() == '\0') {
+                    reporter.report(startLine, "Unterminated comment");
+                    return false;
+                }
+                if (peek() == '*' && peek(1) == '/') {
+                    advance(); advance();
+                    break;
                 }
                 advance();
-            } else if (current == '/' && peek() == '/') {
-                while (pos_ < input_.length() && input_[pos_] != '\n') {
+            }
+            return true;
+        }
+        return false;
+    }
+
+public:
+    Lexer(const string& src, ErrorReporter& reporterRef) : input(src), pos(0), line(1), reporter(reporterRef) {}
+
+    Token nextToken() {
+        static const unordered_map<string, TokenKind> keywordToKind = {
+            {"int", TokenKind::Int}, {"void", TokenKind::Void},
+            {"if", TokenKind::If}, {"else", TokenKind::Else},
+            {"while", TokenKind::While}, {"break", TokenKind::Break},
+            {"continue", TokenKind::Continue}, {"return", TokenKind::Return}
+        };
+        auto isIdentStart = [](char c) { return isalpha(static_cast<unsigned char>(c)) || c == '_'; };
+        auto isIdentCont = [](char c) { return isalnum(static_cast<unsigned char>(c)) || c == '_'; };
+        while (true) {
+            skipWhitespace();
+            if (!skipComment()) break;
+        }
+
+        Token tok;
+        tok.line = line;
+
+        if (peek() == '\0') {
+            tok.type = TokenKind::Eof;
+            return tok;
+        }
+
+        if (isIdentStart(peek())) {
+            string id;
+            while (isIdentCont(peek())) {
+                id += advance();
+            }
+            tok.value = id;
+            auto it = keywordToKind.find(id);
+            tok.type = (it != keywordToKind.end()) ? it->second : TokenKind::Id;
+            return tok;
+        }
+
+        if (isdigit(peek())) {
+            string num;
+            while (isdigit(peek())) {
+                num += advance();
+            }
+            tok.type = TokenKind::Number;
+            tok.value = num;
+            return tok;
+        }
+
+        char ch = peek();
+        switch (ch) {
+            case '+': advance(); tok.type = TokenKind::Plus; return tok;
+            case '-': advance(); tok.type = TokenKind::Minus; return tok;
+            case '*': advance(); tok.type = TokenKind::Star; return tok;
+            case '/': advance(); tok.type = TokenKind::Div; return tok;
+            case '%': advance(); tok.type = TokenKind::Mod; return tok;
+            case '(': advance(); tok.type = TokenKind::LParen; return tok;
+            case ')': advance(); tok.type = TokenKind::RParen; return tok;
+            case '{': advance(); tok.type = TokenKind::LBrace; return tok;
+            case '}': advance(); tok.type = TokenKind::RBrace; return tok;
+            case ';': advance(); tok.type = TokenKind::Semicolon; return tok;
+            case ',': advance(); tok.type = TokenKind::Comma; return tok;
+            case '<':
+                advance();
+                if (peek() == '=') {
                     advance();
+                    tok.type = TokenKind::Le;
+                } else {
+                    tok.type = TokenKind::Lt;
                 }
-            } else if (current == '/' && peek() == '*') {
-                int startLine = line_;
+                return tok;
+            case '>':
                 advance();
-                advance();
-                while (pos_ < input_.length()) {
-                    if (input_[pos_] == '*' && peek() == '/') {
-                        advance();
-                        advance();
-                        break;
-                    }
-                    if (input_[pos_] == '\n') {
-                        line_++;
-                    }
+                if (peek() == '=') {
                     advance();
+                    tok.type = TokenKind::Ge;
+                } else {
+                    tok.type = TokenKind::Gt;
                 }
-                if (pos_ >= input_.length()) {
-                    lexerError("未终止的多行注释", startLine);
+                return tok;
+            case '=':
+                advance();
+                if (peek() == '=') {
+                    advance();
+                    tok.type = TokenKind::Eq;
+                } else {
+                    tok.type = TokenKind::Assign;
                 }
-            } else {
+                return tok;
+            case '!':
+                advance();
+                if (peek() == '=') {
+                    advance();
+                    tok.type = TokenKind::Ne;
+                } else {
+                    tok.type = TokenKind::Not;
+                }
+                return tok;
+            case '&':
+                advance();
+                if (peek() == '&') {
+                    advance();
+                    tok.type = TokenKind::And;
+                    return tok;
+                }
                 break;
-            }
-        }
-    }
-
-    Token identifier() {
-        std::string lexeme;
-        int startLine = line_;
-        while (pos_ < input_.length() && (std::isalnum(input_[pos_]) || input_[pos_] == '_')) {
-            lexeme += input_[pos_];
-            advance();
-        }
-        auto it = keywords_.find(lexeme);
-        if (it != keywords_.end()) {
-            return {it->second, lexeme, startLine};
-        }
-        return {TokenType::ID, lexeme, startLine};
-    }
-
-    Token number() {
-        std::string lexeme;
-        int startLine = line_;
-        if (input_[pos_] == '0') {
-            lexeme += '0';
-            advance();
-        } else {
-            while (pos_ < input_.length() && std::isdigit(input_[pos_])) {
-                lexeme += input_[pos_];
+            case '|':
                 advance();
-            }
+                if (peek() == '|') {
+                    advance();
+                    tok.type = TokenKind::Or;
+                    return tok;
+                }
+                break;
         }
-        return {TokenType::NUMBER, lexeme, startLine};
+        
+        advance();
+        tok.type = TokenKind::Eof;
+        return tok;
     }
+};
 
-    void lexerError(const std::string& message, int line) {
-        hasError_ = true;
-        errors_.insert(std::to_string(line) + " " + message);
+class TokenStream {
+private:
+    const vector<Token>& tokens;
+    size_t index;
+public:
+    TokenStream(const vector<Token>& toks) : tokens(toks), index(0) {}
+    const Token& current() const {
+        if (index >= tokens.size()) return tokens.back();
+        return tokens[index];
     }
-    void lexerError(const std::string& message) {
-        lexerError(message, line_);
+    const Token& peek(int offset = 0) const {
+        if (index + offset >= tokens.size()) return tokens.back();
+        return tokens[index + offset];
+    }
+    void advance() {
+        if (index < tokens.size()) index++;
+    }
+    bool match(TokenKind type) const {
+        return current().type == type;
     }
 };
 
 class Parser {
-public:
-    Parser(Lexer& lexer, std::set<std::string>& errors, bool& hasError)
-        : lexer_(lexer), errors_(errors), hasError_(hasError) {
-        advance();
-        advance();
-    }
-
-    void parse() {
-        parseCompUnit();
-        if (currentToken_.type != TokenType::END_OF_FILE && !hasError_) {
-            reportError("在程序结束后出现意外的 token");
-        }
-    }
-
 private:
-    Lexer& lexer_;
-    Token currentToken_;
-    Token peekToken_;
-    std::set<std::string>& errors_;
-    bool& hasError_;
+    TokenStream& stream;
+    ErrorReporter& reporter;
+    int loopDepth;
+
+    Token current() {
+        return stream.current();
+    }
+
+    Token peek(int offset = 0) {
+        return stream.peek(offset);
+    }
 
     void advance() {
-        currentToken_ = peekToken_;
-        peekToken_ = lexer_.getNextToken();
+        stream.advance();
     }
 
-    bool eat(TokenType expected) {
-        if (currentToken_.type == expected) {
+    void error(const string& msg) {
+        int line = current().line;
+        reporter.report(line, msg);
+    }
+
+    bool match(TokenKind type) {
+        return current().type == type;
+    }
+
+    bool consume(TokenKind type, const string& errMsg) {
+        if (match(type)) {
             advance();
             return true;
-        } else {
-            reportError();
-            return false;
         }
+        error(errMsg);
+        return false;
     }
 
-    void reportError(const std::string& message = "") {
-        hasError_ = true;
-        std::string errorLine = std::to_string(currentToken_.line);
-        if (!message.empty()) {
-            errorLine += " " + message;
+    void sync() {
+        while (!match(TokenKind::Eof) && !match(TokenKind::Semicolon) && !match(TokenKind::RBrace)) {
+            advance();
         }
-        errors_.insert(errorLine);
+        if (match(TokenKind::Semicolon)) advance();
     }
 
     void parseCompUnit() {
-        if (currentToken_.type == TokenType::END_OF_FILE) {
-             reportError("程序为空，至少需要一个函数定义");
-             return;
-        }
-        
-        while (currentToken_.type != TokenType::END_OF_FILE) {
+        while (!match(TokenKind::Eof)) {
             parseFuncDef();
         }
     }
 
     void parseFuncDef() {
-        if (currentToken_.type != TokenType::INT && currentToken_.type != TokenType::VOID) {
-            reportError("期望函数返回类型 (int 或 void)");
-            while(currentToken_.type != TokenType::INT && 
-                  currentToken_.type != TokenType::VOID && 
-                  currentToken_.type != TokenType::END_OF_FILE) {
-                advance();
-            }
-            if (currentToken_.type == TokenType::END_OF_FILE) return;
+        if (!match(TokenKind::Int) && !match(TokenKind::Void)) {
+            error("Expected function return type");
+            sync();
+            if (match(TokenKind::RBrace)) advance();
+            return;
         }
         advance();
 
-        eat(TokenType::ID);
-        eat(TokenType::LPAREN);
-
-        if (currentToken_.type == TokenType::INT) {
-            parseParams();
-        }
-
-        eat(TokenType::RPAREN);
-        parseBlock();
-    }
-
-    void parseParams() {
-        parseParam();
-        while (currentToken_.type == TokenType::COMMA) {
-            advance();
-            parseParam();
-        }
-    }
-
-    void parseParam() {
-        eat(TokenType::INT);
-        eat(TokenType::ID);
-    }
-
-    void parseBlock() {
-        if (!eat(TokenType::LBRACE)) {
+        if (!consume(TokenKind::Id, "Expected function name")) {
+            sync();
+            if (match(TokenKind::RBrace)) advance();
             return;
         }
 
-        while (currentToken_.type != TokenType::RBRACE && currentToken_.type != TokenType::END_OF_FILE) {
+        consume(TokenKind::LParen, "Lack of '('");
+
+        if (match(TokenKind::Int)) {
+            parseParam();
+            while (match(TokenKind::Comma)) {
+                advance();
+                parseParam();
+            }
+        }
+
+        consume(TokenKind::RParen, "Lack of ')'");
+        parseBlock();
+    }
+
+    void parseParam() {
+        consume(TokenKind::Int, "Expected int");
+        consume(TokenKind::Id, "Expected identifier");
+    }
+
+    void parseBlock() {
+        if (!consume(TokenKind::LBrace, "Lack of '{'")) {
+            return;
+        }
+
+        while (!match(TokenKind::RBrace) && !match(TokenKind::Eof)) {
             parseStmt();
         }
 
-        eat(TokenType::RBRACE);
+        consume(TokenKind::RBrace, "Lack of '}'");
     }
 
     void parseStmt() {
-        switch (currentToken_.type) {
-            case TokenType::LBRACE:
-                parseBlock();
-                break;
-            case TokenType::SEMICOLON:
+        if (match(TokenKind::Int)) {
+            advance();
+            consume(TokenKind::Id, "Expected identifier");
+            if (match(TokenKind::Assign)) {
                 advance();
-                break;
-            case TokenType::INT:
-                advance();
-                eat(TokenType::ID);
-                eat(TokenType::ASSIGN);
                 parseExpr();
-                eat(TokenType::SEMICOLON);
-                break;
-            case TokenType::IF:
+            }
+            while (match(TokenKind::Comma)) {
                 advance();
-                eat(TokenType::LPAREN);
-                parseExpr();
-                eat(TokenType::RPAREN);
-                parseStmt();
-                if (currentToken_.type == TokenType::ELSE) {
+                consume(TokenKind::Id, "Expected identifier");
+                if (match(TokenKind::Assign)) {
                     advance();
-                    parseStmt();
+                    parseExpr();
                 }
-                break;
-            case TokenType::WHILE:
+            }
+            consume(TokenKind::Semicolon, "Lack of ';'");
+        } else if (match(TokenKind::If)) {
+            advance();
+            consume(TokenKind::LParen, "Lack of '('");
+            parseExpr();
+            consume(TokenKind::RParen, "Lack of ')'");
+            parseStmt();
+            if (match(TokenKind::Else)) {
                 advance();
-                eat(TokenType::LPAREN);
-                parseExpr();
-                eat(TokenType::RPAREN);
                 parseStmt();
-                break;
-            case TokenType::BREAK:
-                advance();
-                eat(TokenType::SEMICOLON);
-                break;
-            case TokenType::CONTINUE:
-                advance();
-                eat(TokenType::SEMICOLON);
-                break;
-            case TokenType::RETURN:
+            }
+        } else if (match(TokenKind::While)) {
+            advance();
+            consume(TokenKind::LParen, "Lack of '('");
+            parseExpr();
+            consume(TokenKind::RParen, "Lack of ')'");
+            loopDepth++;
+            parseStmt();
+            loopDepth--;
+        } else if (match(TokenKind::Break)) {
+            advance();
+            consume(TokenKind::Semicolon, "Lack of ';'");
+        } else if (match(TokenKind::Continue)) {
+            advance();
+            consume(TokenKind::Semicolon, "Lack of ';'");
+        } else if (match(TokenKind::Return)) {
+            advance();
+            if (!match(TokenKind::Semicolon)) {
+                parseExpr();
+            }
+            consume(TokenKind::Semicolon, "Lack of ';'");
+        } else if (match(TokenKind::LBrace)) {
+            parseBlock();
+        } else if (match(TokenKind::Id)) {
+            advance();
+            if (match(TokenKind::Assign)) {
                 advance();
                 parseExpr();
-                eat(TokenType::SEMICOLON);
-                break;
-
-            case TokenType::ID:
-                if (peekToken_.type == TokenType::ASSIGN) {
-                    advance(); 
-                    advance(); 
+                consume(TokenKind::Semicolon, "Lack of ';'");
+            } else if (match(TokenKind::LParen)) {
+                advance();
+                if (!match(TokenKind::RParen)) {
                     parseExpr();
-                    eat(TokenType::SEMICOLON);
-                } else {
-                    parseExpr();
-                    eat(TokenType::SEMICOLON);
+                    while (match(TokenKind::Comma)) {
+                        advance();
+                        parseExpr();
+                    }
                 }
-                break;
-            
-            default:
-                if (currentToken_.type == TokenType::LPAREN ||
-                    currentToken_.type == TokenType::NUMBER ||
-                    currentToken_.type == TokenType::PLUS ||
-                    currentToken_.type == TokenType::MINUS ||
-                    currentToken_.type == TokenType::NOT) 
-                {
-                    parseExpr();
-                    eat(TokenType::SEMICOLON);
-                } else {
-                    reportError("期望一个语句");
-                    advance();
-                }
-                break;
+                consume(TokenKind::RParen, "Lack of ')'");
+                consume(TokenKind::Semicolon, "Lack of ';'");
+            } else {
+                consume(TokenKind::Semicolon, "Lack of ';'");
+            }
+        } else if (match(TokenKind::Semicolon)) {
+            advance();
+        } else {
+            error("Unexpected token");
+            advance();
         }
     }
 
@@ -373,50 +411,54 @@ private:
         parseLOrExpr();
     }
 
+    // LOrExpr → LAndExpr ("||" LAndExpr)*
     void parseLOrExpr() {
         parseLAndExpr();
-        while (currentToken_.type == TokenType::OR) {
+        while (match(TokenKind::Or)) {
             advance();
             parseLAndExpr();
         }
     }
 
+    // LAndExpr → RelExpr ("&&" RelExpr)*
     void parseLAndExpr() {
         parseRelExpr();
-        while (currentToken_.type == TokenType::AND) {
+        while (match(TokenKind::And)) {
             advance();
             parseRelExpr();
         }
     }
 
+    // RelExpr → AddExpr (("<" | ">" | ...) AddExpr)*
     void parseRelExpr() {
         parseAddExpr();
-        while (currentToken_.type == TokenType::LT || currentToken_.type == TokenType::GT ||
-               currentToken_.type == TokenType::LE || currentToken_.type == TokenType::GE ||
-               currentToken_.type == TokenType::EQ || currentToken_.type == TokenType::NE) {
+        while (match(TokenKind::Lt) || match(TokenKind::Le) || match(TokenKind::Gt) || 
+               match(TokenKind::Ge) || match(TokenKind::Eq) || match(TokenKind::Ne)) {
             advance();
             parseAddExpr();
         }
     }
 
+    // AddExpr → MulExpr (("+" | "-") MulExpr)*
     void parseAddExpr() {
         parseMulExpr();
-        while (currentToken_.type == TokenType::PLUS || currentToken_.type == TokenType::MINUS) {
+        while (match(TokenKind::Plus) || match(TokenKind::Minus)) {
             advance();
             parseMulExpr();
         }
     }
 
+    // MulExpr → UnaryExpr (("*" | "/" | "%") UnaryExpr)*
     void parseMulExpr() {
         parseUnaryExpr();
-        while (currentToken_.type == TokenType::STAR || currentToken_.type == TokenType::SLASH || currentToken_.type == TokenType::PERCENT) {
+        while (match(TokenKind::Star) || match(TokenKind::Div) || match(TokenKind::Mod)) {
             advance();
             parseUnaryExpr();
         }
     }
 
     void parseUnaryExpr() {
-        if (currentToken_.type == TokenType::PLUS || currentToken_.type == TokenType::MINUS || currentToken_.type == TokenType::NOT) {
+        if (match(TokenKind::Plus) || match(TokenKind::Minus) || match(TokenKind::Not)) {
             advance();
             parseUnaryExpr();
         } else {
@@ -425,67 +467,70 @@ private:
     }
 
     void parsePrimaryExpr() {
-        switch (currentToken_.type) {
-            case TokenType::ID:
+        if (match(TokenKind::Id)) {
+            advance();
+            if (match(TokenKind::LParen)) {
                 advance();
-                if (currentToken_.type == TokenType::LPAREN) {
-                    advance(); 
-                    
-                    if (currentToken_.type != TokenType::RPAREN) {
-                        parseArgs();
+                if (!match(TokenKind::RParen)) {
+                    parseExpr();
+                    while (match(TokenKind::Comma)) {
+                        advance();
+                        parseExpr();
                     }
-                    
-                    eat(TokenType::RPAREN);
                 }
-                break;
-            case TokenType::NUMBER:
+                consume(TokenKind::RParen, "Lack of ')'");
+            }
+        } else if (match(TokenKind::Number)) {
+            advance();
+        } else if (match(TokenKind::LParen)) {
+            advance();
+            parseExpr();
+            consume(TokenKind::RParen, "Lack of ')'");
+        } else {
+            error("Expected expression");
+            if (!match(TokenKind::Eof) && !match(TokenKind::Semicolon)) {
                 advance();
-                break;
-            case TokenType::LPAREN:
-                advance(); 
-                parseExpr();
-                eat(TokenType::RPAREN);
-                break;
-            default:
-                reportError("期望 标识符(ID)、数字、或 (表达式)");
-                break;
+            }
         }
     }
 
-    void parseArgs() {
-        parseExpr();
-        while (currentToken_.type == TokenType::COMMA) {
-            advance(); 
-            parseExpr();
-        }
+public:
+    Parser(TokenStream& ts, ErrorReporter& rep) : stream(ts), reporter(rep), loopDepth(0) {}
+
+    bool parse() {
+        parseCompUnit();
+        return !reporter.hasError();
     }
 };
 
 int main() {
-    std::ostringstream ss;
-    ss << std::cin.rdbuf();
-    std::string input = ss.str();
-
-    std::set<std::string> errors; 
-    bool hasError = false;
-
-    Lexer lexer(input, errors, hasError);
-    Parser parser(lexer, errors, hasError);
-    
-    try {
-        parser.parse();
-    } catch (const std::exception& e) {
-        hasError = true;
-        errors.insert("0 " + std::string(e.what()));
+    string input, line;
+    while (getline(cin, line)) {
+        input += line + "\n";
     }
 
-    if (hasError) {
-        std::cout << "reject" << std::endl;
-        for (const auto& errLine : errors) {
-            std::cout << errLine.substr(0, errLine.find(' ')) << std::endl;
-        }
+    ErrorReporter reporter;
+    Lexer lexer(input, reporter);
+    vector<Token> tokens;
+    
+    while (true) {
+        Token tok = lexer.nextToken();
+        tokens.emplace_back(tok);
+        if (tok.type == TokenKind::Eof) break;
+    }
+
+    TokenStream stream(tokens);
+
+    Parser parser(stream, reporter);
+    bool success = parser.parse();
+
+    if (!reporter.hasError()) {
+        cout << "accept" << endl;
     } else {
-        std::cout << "accept" << std::endl;
+        cout << "reject" << endl;
+        for (const auto& e : reporter.errors()) {
+            cout << e.first << " " << e.second << endl;
+        }
     }
 
     return 0;
